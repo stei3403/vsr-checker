@@ -1,0 +1,549 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>VSR Checker</title>
+  <link rel="stylesheet" href="style.css" />
+  <style>
+    .highlight-edited {
+      border: 2px solid red;
+    }
+    .confirmation-modal {
+      position: fixed;
+      top: 20%;
+      left: 50%;
+      transform: translateX(-50%);
+      background: white;
+      border: 1px solid #ccc;
+      padding: 1em;
+      z-index: 999;
+      box-shadow: 0px 0px 15px rgba(0,0,0,0.2);
+      max-width: 500px;
+    }
+    .confirmation-modal ul {
+      padding-left: 1em;
+      margin-bottom: 1em;
+    }
+    .confirmation-modal button {
+      margin-right: 1em;
+    }
+    .dtc-active {
+      background-color: #faa9b0;
+    }
+    .dtc-pending {
+      background-color: #fff0bd;
+    }
+    .dtc-stored {
+      background-color: #e0e0e0;
+    }
+  </style>
+</head>
+<body>
+  <h1>🚗 Vehicle Scan Report Checker</h1>
+
+  <!-- BEGIN: Exportable content -->
+  <div id="exportContent">
+    <label for="vehicleProgram">Select Vehicle Program:</label>
+    <select id="vehicleProgram" name="vehicleProgram" required>
+      <option value="KX">KX</option>
+      <option value="WS REPB">WS REPB</option>
+      <option value="DT REPB">DT REPB</option>
+      <option value="WL">WL</option>
+    </select>
+
+    <!-- File Upload -->
+    <div class="upload-meta-wrapper">
+      <form id="vsrForm" enctype="multipart/form-data">
+        <input type="file" id="fileInput" name="vsrfile" accept=".htm" required />
+        <p id="filenameDisplay" class="filename"></p>
+      </form>
+      <!-- MetaData -->
+      <div id="vehicleInfo" class="vehicle-info" style="display: none;"></div>
+    </div>
+
+    <!-- VSR Summary -->
+    <div id="scanSummary" class="vehicle-info" style="display: none;"></div>
+
+    <!-- Controls -->
+    <div id="tableControls" class="table-controls-wrapper" style="display: none;">
+      <button id="saveInlineBtn" class="save-button" style="display: none;">💾 Save Master List Changes</button>
+      <input type="text" id="searchInput" placeholder="🔍 Search..." class="search-bar" />
+    </div>
+
+    <!-- Table Output -->
+    <div class="collapsible-section vsr-dependent" style="display: none;">
+      <h2 onclick="toggleSection('resultTableContainer')">📋 ECU Comparison Table <span class="toggle-icon">▲</span></h2>
+      <div id="resultTableContainer"></div>
+    </div>
+
+    <!-- Action Plan -->
+    <div class="collapsible-section vsr-dependent" style="display: none;">
+      <h2 onclick="toggleSection('actionPlanContainer')">🛠 Action Plan <span class="toggle-icon">▲</span></h2>
+      <div id="actionPlanContainer" class="action-plan">
+        <div id="actionPlanContent"></div>
+      </div>
+    </div>
+
+    <!-- DTC Table -->
+    <div class="collapsible-section vsr-dependent" style="display: none;">
+      <h2 onclick="toggleSection('dtcTableContainer')">⚠️ Diagnostic Trouble Codes (DTCs) <span class="toggle-icon">▲</span></h2>
+      <div id="dtcTableContainer" class="dtc-section">
+        <input type="text" id="dtcSearchInput" placeholder="🔍 Search DTCs..." class="search-bar" />
+        <div id="dtcTableContent"></div>
+      </div>
+    </div>
+
+  <!-- END: Exportable content -->
+  <button id="exportPdfBtn" class="save-button" style="margin-top: 1rem; display: none;">
+    📄 Export Full Report to PDF
+  </button>
+
+  <!-- Confirmation Modal -->
+  <div id="confirmationModal" class="confirmation-modal" style="display: none;">
+    <h3>Confirm Changes</h3>
+    <ul id="changeSummary"></ul>
+    <button id="confirmSave">✅ Confirm</button>
+    <button id="cancelSave">❌ Cancel</button>
+  </div>
+
+  <!-- Back to Top Button -->
+  <button id="backToTop" style="position:fixed;bottom:20px;right:20px;display:none;">🔝 Top</button>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+  <script>
+    const fileInput = document.getElementById('fileInput');
+    const filenameDisplay = document.getElementById('filenameDisplay');
+    const searchInput = document.getElementById('searchInput');
+    const vehicleInfo = document.getElementById('vehicleInfo');
+    const scanSummary = document.getElementById('scanSummary');
+    const resultContainer = document.getElementById('resultTableContainer');
+    const saveInlineBtn = document.getElementById('saveInlineBtn');
+    const confirmationModal = document.getElementById('confirmationModal');
+    const changeSummary = document.getElementById('changeSummary');
+    const confirmSave = document.getElementById('confirmSave');
+    const cancelSave = document.getElementById('cancelSave');
+    const topBtn = document.getElementById('backToTop');
+    const MASTER_EDIT_PASSWORD = import.meta.env.VITE_MASTER_EDIT_PASSWORD;
+
+    let fullResults = [];
+    let currentSort = { column: 'ECU', asc: true };
+    let currentDTCSort = { column: 'Status', asc: true };
+    let editedRows = {};
+    let originalData = {};
+    let fullDTCs = [];
+
+    fileInput.addEventListener('change', async () => {
+      const file = fileInput.files[0];
+      if (!file) return;
+
+      filenameDisplay.textContent = `📄 ${file.name}`;
+      vehicleInfo.style.display = 'none';
+      resultContainer.innerHTML = "<p>⏳ Uploading and comparing...</p>";
+
+      const formData = new FormData();
+      formData.append('vsrfile', file);
+
+      const vehicleProgram = document.getElementById('vehicleProgram').value;
+      formData.append('vehicleProgram', vehicleProgram);
+
+      try {
+        const res = await fetch('/api/upload-vsr', { method: 'POST', body: formData });
+        if (!res.ok) {
+          const errMsg = await res.text();
+          throw new Error(`Upload failed: ${res.status} - ${errMsg}`);
+        }
+        const { results, metadata, dtcData } = await res.json();
+        fullResults = results.sort((a, b) => a.ECU.localeCompare(b.ECU));
+        originalData = Object.fromEntries(fullResults.map(row => [row.ECU, { ...row }]));
+        fullDTCs = dtcData || [];
+        renderMetadata(metadata);
+        renderScanSummary(fullResults, fullDTCs);
+        renderTable(fullResults);
+        renderDTCs(sortDTCData(fullDTCs));
+        document.querySelectorAll('.vsr-dependent').forEach(el => el.style.display = 'block');
+        vehicleInfo.style.display = 'block';
+        document.getElementById('tableControls').style.display = 'flex';
+        showExportButton();
+      } catch (err) {
+        resultContainer.innerHTML = "<p>❌ Something went wrong.</p>";
+        console.error(err);
+      }
+    });
+
+    function sortDTCData(data) {
+      const { column, asc } = currentDTCSort;
+      return [...data].sort((a, b) => {
+        const valA = String(a[column.toLowerCase()] ?? '');
+        const valB = String(b[column.toLowerCase()] ?? '');
+        return asc ? valA.localeCompare(valB) : valB.localeCompare(valA);
+      });
+    }
+
+    function renderMetadata({ year, body, vin, date }) {
+      vehicleInfo.innerHTML = `
+        <div class="vehicle-card">
+          <p><strong>Year:</strong> ${year}</p>
+          <p><strong>Model:</strong> ${body}</p>
+          <p><strong>VIN:</strong> ${vin}</p>
+          <p><strong>Scan Date:</strong> ${date}</p>
+        </div>
+      `;
+    }
+
+    function renderScanSummary(results, dtcData) {
+      const totalECUs = results.length;
+      const mismatches = results.filter(r =>
+        ["❌", "⚠️", "💜"].some(prefix => (r.PartStatus?.startsWith(prefix) || r.SWStatus?.startsWith(prefix)))
+      ).length;
+      const dtcCount = dtcData?.length || 0;
+
+      scanSummary.innerHTML = `
+        <div class="vehicle-card">
+          <p><strong>Total ECUs:</strong> ${totalECUs}</p>
+          <p><strong>ECUs Needing Attention:</strong> ${mismatches}</p>
+          <p><strong>DTCs Found:</strong> ${dtcCount}</p>
+        </div>
+      `;
+      scanSummary.style.display = 'block';
+    }
+
+    searchInput.addEventListener('input', () => {
+      const searchTerm = searchInput.value.toLowerCase();
+      const filtered = fullResults.filter(row =>
+        Object.values(row).some(val =>
+          String(val).toLowerCase().includes(searchTerm)
+        )
+      );
+      renderTable(filtered);
+    });
+
+    document.getElementById('dtcSearchInput').addEventListener('input', () => {
+      const term = document.getElementById('dtcSearchInput').value.toLowerCase();
+      const filtered = fullDTCs.filter(entry =>
+        Object.values(entry).some(val => String(val).toLowerCase().includes(term))
+      );
+      renderDTCs(filtered);
+    });
+
+    topBtn.addEventListener('click', () => window.scrollTo({ top: 0, behavior: 'smooth' }));
+    window.addEventListener('scroll', () => {
+      topBtn.style.display = window.scrollY > 300 ? 'block' : 'none';
+    });
+
+    function showExportButton() {
+      document.getElementById('exportPdfBtn').style.display = 'inline-block';
+    }
+
+    document.getElementById('exportPdfBtn').addEventListener('click', () => {
+      const filename = document.getElementById('filenameDisplay')?.textContent || 'vsr-report';
+      const element = document.getElementById('exportContent');
+      const actionWrapper = document.getElementById('actionPlanContainer');
+
+      const originalDisplay = actionWrapper.style.display;
+      actionWrapper.style.display = 'block';
+
+      const opt = {
+        margin: 0.3,
+        filename: `${filename.replace('📄 ', '').replace(/\s+/g, '_')}.pdf`,
+        image: { type: 'jpeg', quality: 0.98 },
+        html2canvas: { scale: 3 },
+        jsPDF: { unit: 'in', format: 'letter', orientation: 'landscape' }
+      };
+
+      html2pdf().set(opt).from(element).save().then(() => {
+        actionWrapper.style.display = originalDisplay;
+      });
+    });
+    function renderTable(results) {
+      resultContainer.innerHTML = "";
+      const table = document.createElement('table');
+      table.className = "vsr-table";
+
+      const headers = Object.keys(results[0]);
+      const thead = table.createTHead();
+      const headerRow = thead.insertRow();
+
+      headers.forEach((key) => {
+        const th = document.createElement('th');
+        const isEditable = ["ExpectedPartNum", "ExpectedSW", "Priority", "FIOwner", "SubsystemOwner"].includes(key);
+
+        th.style.cursor = "pointer";
+
+        const headerSpan = document.createElement('span');
+        headerSpan.textContent = `${key} ⇅`;
+
+        th.appendChild(headerSpan);
+
+        if (isEditable) {
+          const infoIcon = document.createElement('span');
+          infoIcon.textContent = ' ℹ️';
+          infoIcon.title = "You can edit this field. Changes will update the master database for all users.";
+          infoIcon.style.cursor = 'help';
+          infoIcon.style.marginLeft = '4px';
+          th.appendChild(infoIcon);
+        }
+
+        th.addEventListener('click', () => {
+          const asc = currentSort.column === key ? !currentSort.asc : true;
+          currentSort = { column: key, asc };
+          const sorted = [...results].sort((a, b) =>
+            asc ? String(a[key]).localeCompare(String(b[key])) : String(b[key]).localeCompare(String(a[key]))
+          );
+          renderTable(sorted);
+          renderActionPlan(results);
+        });
+
+        headerRow.appendChild(th);
+      });
+
+
+
+      const tbody = table.createTBody();
+      results.forEach(row => {
+        const tr = tbody.insertRow();
+        const ecuKey = row["ECU"];
+
+        headers.forEach(key => {
+          const td = tr.insertCell();
+
+          if (["ExpectedPartNum", "ExpectedSW", "Priority", "FIOwner", "SubsystemOwner"].includes(key)) {
+            td.contentEditable = true;
+            td.innerText = row[key];
+
+            td.addEventListener('input', () => {
+              if (!editedRows[ecuKey]) {
+                editedRows[ecuKey] = { ECU: ecuKey };
+              }
+              editedRows[ecuKey][key] = td.innerText.trim();
+              td.classList.add("highlight-edited");
+              saveInlineBtn.style.display = 'inline-block';
+            });
+          } else {
+            td.innerText = row[key];
+          }
+
+          const partStatus = row.PartStatus;
+          const swStatus = row.SWStatus;
+
+          if (["PartStatus", "ReportedPartNum", "ExpectedPartNum"].includes(key)) {
+            if (partStatus?.startsWith("✅")) td.classList.add('status-match');
+            else if (partStatus?.startsWith("⚠️")) td.classList.add('status-older');
+            else if (partStatus?.startsWith("💜")) td.classList.add('status-newer');
+            else if (partStatus?.startsWith("❌")) td.classList.add('status-notfound');
+          }
+
+          if (["SWStatus", "ReportedSW", "ExpectedSW"].includes(key)) {
+            if (swStatus?.startsWith("✅")) td.classList.add('status-match');
+            else if (swStatus?.startsWith("⚠️")) td.classList.add('status-older');
+            else if (swStatus?.startsWith("💜")) td.classList.add('status-newer');
+            else if (swStatus?.startsWith("❌")) td.classList.add('status-notfound');
+          }
+        });
+      });
+
+      resultContainer.appendChild(table);
+      renderActionPlan(results);
+    }
+
+    function renderActionPlan(results) {
+      const wrapper = document.getElementById('actionPlanContainer');
+      const container = document.getElementById('actionPlanContent');
+      container.innerHTML = '';
+      wrapper.style.display = 'block';
+
+      const needsUpdate = results.filter(row =>
+        row.PartStatus?.startsWith("❌") || row.PartStatus?.startsWith("⚠️") || row.PartStatus?.startsWith("💜") ||
+        row.SWStatus?.startsWith("❌") || row.SWStatus?.startsWith("⚠️") || row.SWStatus?.startsWith("💜")
+      );
+
+      const grouped = { 1: [], 2: [], 3: [] };
+      needsUpdate.forEach(item => {
+        const priority = parseInt(item.Priority);
+        if ([1, 2, 3].includes(priority)) grouped[priority].push(item);
+      });
+
+      const labels = {
+        1: 'Priority 1: Update Critical Base Vehicle ECUs',
+        2: 'Priority 2: Update ADAS ECUs',
+        3: 'Priority 3: Update Other Base Vehicle ECUs'
+      };
+
+      for (const prio of [1, 2, 3]) {
+        if (grouped[prio].length > 0) {
+          const section = document.createElement('div');
+          section.innerHTML = `<h3>${labels[prio]}</h3>`;
+          const ul = document.createElement('ul');
+          grouped[prio].forEach(row => {
+            const li = document.createElement('li');
+            const contacts = [];
+            if (row.FIOwner && !/^(n\/?a\.?|na)$/i.test(row.FIOwner)) contacts.push(row.FIOwner);
+            if (row.SubsystemOwner && !/^(n\/?a\.?|na)$/i.test(row.SubsystemOwner)) contacts.push(row.SubsystemOwner);
+            const contactText = contacts.length > 0 ? ` Contact ${contacts.join(' and ')}.` : '';
+            //li.textContent = `${row.ECU}: Update to Part # ${row.ExpectedPartNum}, and SW Version ${row.ExpectedSW}.${contactText}`;
+            li.innerHTML = `<strong>${row.ECU}</strong>: Update to Part # <strong>${row.ExpectedPartNum}</strong>, and SW Version <strong>${row.ExpectedSW}</strong>.${contactText}`;
+
+            ul.appendChild(li);
+          });
+          section.appendChild(ul);
+          container.appendChild(section);
+        }
+      }
+
+      if (needsUpdate.length === 0) {
+        container.innerHTML = `<p><strong>✅ All ECUs are up to date.</strong></p>`;
+      }
+    }
+
+    function renderDTCs(dtcData) {
+      const wrapper = document.getElementById('dtcTableContainer');
+      const container = document.getElementById('dtcTableContent');
+      container.innerHTML = '';
+
+      if (!dtcData || dtcData.length === 0) {
+        container.innerHTML = `<p><strong>✅ No DTCs found.</strong></p>`;
+        wrapper.style.display = 'block';
+        return;
+      }
+
+      const sortedData = [...dtcData].sort((a, b) => {
+        const { column, asc } = currentDTCSort;
+        const valA = String(a[column.toLowerCase()] ?? '');
+        const valB = String(b[column.toLowerCase()] ?? '');
+        return asc ? valA.localeCompare(valB) : valB.localeCompare(valA);
+      });
+
+      const table = document.createElement('table');
+      table.className = 'vsr-table';
+
+      const headers = ['ECU', 'DTC Code', 'MIL', 'Status', 'Description'];
+      const thead = table.createTHead();
+      const headerRow = thead.insertRow();
+
+      headers.forEach(header => {
+        const th = document.createElement('th');
+        th.textContent = `${header} ⇅`;
+        th.style.cursor = 'pointer';
+        th.addEventListener('click', () => {
+          const asc = currentDTCSort.column === header ? !currentDTCSort.asc : true;
+          currentDTCSort = { column: header, asc };
+          renderDTCs(fullDTCs); // fullDTCs is the master copy
+        });
+        headerRow.appendChild(th);
+      });
+
+      const tbody = table.createTBody();
+      sortedData.forEach(entry => {
+        const row = tbody.insertRow();
+        const statusClass = {
+          active: 'dtc-active',
+          pending: 'dtc-pending',
+          stored: 'dtc-stored'
+        }[entry.status?.toLowerCase()];
+        if (statusClass) row.classList.add(statusClass);
+
+        [entry.ecu, entry.dtcCode, entry.mil, entry.status, entry.description].forEach(val => {
+          const cell = row.insertCell();
+          cell.textContent = val;
+        });
+
+        if (entry.snapshot && entry.snapshot.length > 0) {
+          const snapRow = table.insertRow();
+          const cell = snapRow.insertCell();
+          cell.colSpan = 5;
+          const ul = document.createElement('ul');
+          entry.snapshot.forEach(snap => {
+            const li = document.createElement('li');
+            li.textContent = `${snap.name}: ${snap.value}`;
+            ul.appendChild(li);
+          });
+          cell.appendChild(ul);
+        }
+      });
+
+      container.appendChild(table);
+      wrapper.style.display = 'block';
+    }
+
+
+    saveInlineBtn.addEventListener('click', () => {
+      const changes = Object.values(editedRows);
+      if (changes.length === 0) return;
+
+      changeSummary.innerHTML = '';
+      changes.forEach(change => {
+        const ecu = change.ECU;
+        const orig = originalData[ecu];
+        for (const field of ["ExpectedPartNum", "ExpectedSW", "Priority", "FIOwner", "SubsystemOwner"]) {
+          if (change[field] !== undefined && String(change[field]) !== String(orig?.[field])) {
+            const li = document.createElement('li');
+            li.textContent = `${ecu} ${field} changed from "${orig?.[field] ?? '[blank]'}" to "${change[field]}"`;
+            changeSummary.appendChild(li);
+          }
+        }
+      });
+
+      confirmationModal.style.display = 'block';
+    });
+
+    
+    confirmSave.addEventListener('click', async () => {
+      const password = prompt("🔐 Enter password to save master list changes:");
+      if (password !== MASTER_EDIT_PASSWORD) {
+        alert("❌ Incorrect password. Changes not saved.");
+        return;
+      }
+
+      confirmationModal.style.display = 'none';
+      const changes = Object.values(editedRows);
+      const vehicleProgram = document.getElementById('vehicleProgram').value; // ✅ Moved to top
+      const file = document.getElementById('fileInput').files[0];
+      const formData = new FormData();
+      formData.append('vsrfile', file);
+      formData.append('vehicleProgram', vehicleProgram);
+
+      try {
+        const res = await fetch('/api/update-master', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ vehicleProgram, changes }),
+        });
+
+        if (!res.ok) throw new Error("Update failed");
+
+        editedRows = {};
+        saveInlineBtn.style.display = 'none';
+
+        const res2 = await fetch('/api/upload-vsr', {
+          method: 'POST',
+          body: formData
+        });
+
+        const { results, metadata, dtcData } = await res2.json();
+        fullResults = results.sort((a, b) => a.ECU.localeCompare(b.ECU));
+        originalData = Object.fromEntries(fullResults.map(row => [row.ECU, { ...row }]));
+        renderMetadata(metadata);
+        renderScanSummary(fullResults, dtcData);
+        renderTable(fullResults);
+        renderDTCs(sortDTCData(dtcData));
+      } catch (err) {
+        alert("❌ Save failed.");
+        console.error(err);
+      }
+    });
+
+    cancelSave.addEventListener('click', () => {
+      confirmationModal.style.display = 'none';
+    });
+
+    function toggleSection(id) {
+      const section = document.getElementById(id);
+      const icon = section?.previousElementSibling?.querySelector('.toggle-icon');
+      if (!section) return;
+
+      const isVisible = section.style.display !== 'none';
+      section.style.display = isVisible ? 'none' : 'block';
+      if (icon) icon.textContent = isVisible ? '▼' : '▲';
+    }
+
+  </script>
+</body>
+</html>

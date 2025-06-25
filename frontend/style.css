@@ -1,0 +1,202 @@
+body {
+  font-family: Arial, sans-serif;
+  margin: 2rem;
+  background-color: #f9f9f9;
+  color: #333;
+}
+
+h1 {
+  text-align: center;
+  margin-bottom: 2rem;
+}
+
+input[type="file"] {
+  display: block;
+  margin-bottom: 1rem;
+}
+
+.filename {
+  font-weight: bold;
+  margin-bottom: 1.5rem;
+}
+
+.vehicle-info {
+  margin-top: 1rem;
+  margin-bottom: 1.5rem;
+  background-color: #fff;
+  padding: 1rem;
+  border-left: 4px solid #007bff;
+  box-shadow: 0 0 5px rgba(0,0,0,0.1);
+}
+
+.vehicle-card p {
+  margin: 0.3rem 0;
+}
+
+.table-controls-wrapper {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 1rem;
+  margin-bottom: 1rem;
+  flex-wrap: wrap;
+}
+
+.search-bar {
+  padding: 0.4rem 0.6rem;
+  font-size: 1rem;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  min-width: 240px;
+}
+
+.save-button {
+  padding: 0.5rem 1rem;
+  font-size: 0.95rem;
+  border: none;
+  background-color: #28a745;
+  color: white;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+}
+
+.save-button:hover {
+  background-color: #218838;
+}
+
+.table-container {
+  max-height: 600px;
+  overflow-y: auto;
+  border: 1px solid #ccc;
+}
+
+.vsr-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 1rem;
+  background-color: #fff;
+  box-shadow: 0 0 5px rgba(0,0,0,0.1);
+  table-layout: fixed;
+}
+
+.vsr-table th,
+.vsr-table td {
+  padding: 0.6rem 0.8rem;
+  border: 1px solid #ddd;
+  text-align: left;
+  vertical-align: top;
+}
+
+.vsr-table th {
+  background-color: #f1f1f1;
+  font-weight: bold;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  box-shadow: 0 2px 5px rgba(0,0,0,0.05);
+}
+
+.status-match {
+  background-color: #b3fcc4; /* green */
+}
+
+.status-older {
+  background-color: #fff0bd; /* yellow */
+}
+
+.status-newer {
+  background-color: #d392ff; /* purple */
+}
+
+.status-notfound {
+  background-color: #faa9b0; /* red */
+}
+
+.dtc-active {
+  background-color: #faa9b0; /* red */
+}
+
+.dtc-pending {
+  background-color: #fff0bd; /* yellow */
+}
+
+.dtc-stored {
+  background-color: #e0e0e0; /* gray */
+}
+
+.highlight-edited {
+  border: 2px solid red !important;
+  background-color: #fff5f5;
+}
+
+.upload-meta-wrapper {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 2rem;
+  margin-bottom: 1.5rem;
+  flex-wrap: wrap;
+}
+
+#vsrForm {
+  flex: 1;
+  min-width: 240px;
+}
+
+#vehicleInfo {
+  flex: 2;
+  min-width: 280px;
+}
+
+.action-plan {
+  margin-top: 2rem;
+  background: #fff;
+  padding: 1rem 1.5rem;
+  border-left: 4px solid #007bff;
+  box-shadow: 0 0 5px rgba(0,0,0,0.05);
+}
+
+.action-plan h3 {
+  margin-top: 1rem;
+  margin-bottom: 0.5rem;
+  color: #007bff;
+}
+
+.action-plan ul {
+  margin: 0 0 1rem 1.2rem;
+  padding: 0;
+}
+
+.action-plan li {
+  margin-bottom: 0.5rem;
+}
+
+#exportContent .vsr-table {
+  font-size: 16px;
+  table-layout: auto;
+  width: 100%;
+}
+
+.vsr-table ul {
+  margin: 0.5em 0;
+  padding-left: 1.2em;
+}
+.vsr-table li {
+  font-size: 12px;
+}
+
+.collapsible-section h2 {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background-color: #e9ecef;
+  padding: 0.5rem 1rem;
+  margin-top: 2rem;
+  border-radius: 4px;
+}
+
+.toggle-icon {
+  font-size: 1.2rem;
+  margin-left: 0.5rem;
+}
